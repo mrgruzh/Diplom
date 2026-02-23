@@ -14,20 +14,12 @@ Android-приложение на Kotlin + Compose.
    - [Eclipse Temurin (Adoptium)](https://adoptium.net/)
    - или [Microsoft Build of OpenJDK](https://www.microsoft.com/openjdk)
 
-2. Укажите эту Java для Gradle одним из способов.
-
-   **Вариант А — переменная окружения (в той же консоли):**
+2. Укажите эту Java для Gradle.
    ```bat
    set JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17.0.x-hotspot
    .\gradlew.bat assembleDebug
    ```
    Подставьте свой путь к установленному JDK.
-
-   **Вариант Б — в `gradle.properties` в корне проекта:**
-   ```properties
-   org.gradle.java.home=C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.x-hotspot
-   ```
-   Снова подставьте свой путь (с двойными обратными слэшами `\\`).
 
 3. Соберите проект:
    ```bat
