@@ -1,32 +1,37 @@
-# Diplom
+# Diplom (полевая медицина)
 
-Учебный Android-проект по полевой медицине (Kotlin + Jetpack Compose).
+Android-приложение на Kotlin + Compose.
 
-Коротко по тому, что уже есть:
-- роли пользователей (фельдшер, эвакопункт, госпиталь, фонд);
-- ручное заполнение формы и голосовой ввод;
-- генерация PDF (форма 100) и сводки;
-- локальная работа без сервера.
+## Требования
 
-## Как запустить
+- **Java 11 или новее** (JDK 17 рекомендуется). Android Gradle Plugin 8.x не поддерживает Java 8.
 
-1. Открыть проект в Android Studio.
-2. В `Settings -> Build, Execution, Deployment -> Build Tools -> Gradle` выбрать `Gradle JDK = jbr-21` (или любой JDK 17+).
-3. Сделать `Build -> Rebuild Project`.
-4. Запустить на эмуляторе/телефоне.
+## Сборка
 
-## Оффлайн голосовой ввод (Vosk)
+### Если сборка пишет «This build uses a Java 8 JVM»
 
-Для голосового режима нужна русская модель Vosk в `app/src/main/assets/model-ru`.
+1. Установите JDK 11 или 17, например:
+   - [Eclipse Temurin (Adoptium)](https://adoptium.net/)
+   - или [Microsoft Build of OpenJDK](https://www.microsoft.com/openjdk)
 
-Самый простой вариант — запустить скрипт из корня проекта:
+2. Укажите эту Java для Gradle одним из способов.
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\download_vosk_model.ps1
-```
+   **Вариант А — переменная окружения (в той же консоли):**
+   ```bat
+   set JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17.0.x-hotspot
+   .\gradlew.bat assembleDebug
+   ```
+   Подставьте свой путь к установленному JDK.
 
-После этого еще раз `Rebuild Project`.
+   **Вариант Б — в `gradle.properties` в корне проекта:**
+   ```properties
+   org.gradle.java.home=C:\\Program Files\\Eclipse Adoptium\\jdk-17.0.x-hotspot
+   ```
+   Снова подставьте свой путь (с двойными обратными слэшами `\\`).
 
-## Если не собирается
+3. Соберите проект:
+   ```bat
+   .\gradlew.bat assembleDebug
+   ```
 
-Чаще всего проблема в Java. Если видишь ошибку про Java 8, переключи Gradle JDK на 17/21 и пересобери проект.
+APK будет в `app/build/outputs/apk/debug/`.
