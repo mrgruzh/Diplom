@@ -51,8 +51,15 @@ enum class VoiceCommand(
         aliases = listOf("способ эвакуации", "эвакуация", "эвак")
     ),
     MEDICINE(
-        label = "Лекарство",
-        aliases = listOf("лекарство", "препарат", "медикамент")
+        label = "Препарат и количество",
+        aliases = listOf(
+            "препарат и количество",
+            "препарат количество",
+            "количество препарата",
+            "препарат",
+            "лекарство",
+            "медикамент"
+        )
     )
 }
 
@@ -284,6 +291,14 @@ object VoiceFormInterpreter {
     private fun parseMedicine(value: String): MedicineItemDraft {
         val trimmed = value.trim()
         if (trimmed.isBlank()) return MedicineItemDraft("-", "-")
+
+        val byKeyword = Regex("^(.+?)\\s+количеств\\S*\\s+(.+)$").find(trimmed)
+        if (byKeyword != null) {
+            return MedicineItemDraft(
+                name = byKeyword.groupValues[1].trim().ifBlank { "-" },
+                qty = byKeyword.groupValues[2].trim().ifBlank { "-" }
+            )
+        }
 
         val byDash = Regex("^(.+?)\\s*[-—]\\s*(.+)$").find(trimmed)
         if (byDash != null) {

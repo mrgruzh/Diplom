@@ -6,14 +6,21 @@ import android.content.pm.PackageManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
@@ -22,6 +29,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.MicNone
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Send
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DatePicker
@@ -32,6 +42,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
@@ -45,12 +56,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -216,23 +225,16 @@ fun FieldVoiceScreen(
 ) {
     val context = LocalContext.current
 
-    val circleFill: Color
-    val circleStroke: Color
-    val micColor: Color
-    val outlineColor: Color
-
+    val heroBackground: Color
+    val accentColor: Color
     when (status) {
         FieldStatus.POGIB -> {
-            circleFill = PaleRed
-            circleStroke = Coral
-            micColor = OliveDark
-            outlineColor = Coral
+            heroBackground = PaleRed
+            accentColor = Coral
         }
         FieldStatus.RANEN -> {
-            circleFill = PaleGreen
-            circleStroke = OliveDark
-            micColor = Coral
-            outlineColor = OliveDark
+            heroBackground = PaleGreen
+            accentColor = OliveDark
         }
     }
 
@@ -241,14 +243,16 @@ fun FieldVoiceScreen(
             время и дата заполнения, ФИО,
             позывной, номер жетона,
             время и дата смерти,
-            способ эвакуации.
+            способ эвакуации,
+            препарат и количество.
         """.trimIndent()
         FieldStatus.RANEN -> """
             время и дата заполнения, ФИО,
             позывной, номер жетона,
             время и дата ранения, вид поражения,
             диагноз, локализация,
-            способ эвакуации.
+            способ эвакуации,
+            препарат и количество.
         """.trimIndent()
     }
 
@@ -266,8 +270,6 @@ fun FieldVoiceScreen(
     var engineState by remember { mutableStateOf(VoskCommandRecognizer.EngineState.PREPARING) }
     var engineMessage by remember { mutableStateOf<String?>(null) }
     var isListening by remember { mutableStateOf(false) }
-    var partialText by remember(status, initialDraft) { mutableStateOf("") }
-    var finalText by remember(status, initialDraft) { mutableStateOf("") }
 
     val recognizer = remember { VoskCommandRecognizer(context, modelAssetPath = "model-ru") }
 
@@ -293,9 +295,8 @@ fun FieldVoiceScreen(
         }
         val started = recognizer.start(
             mode = mode,
-            onPartialText = { text -> partialText = text },
+            onPartialText = { },
             onUtteranceText = { utterance ->
-                finalText = utterance
                 val interpreted = VoiceFormInterpreter.applyUtterance(
                     status = status,
                     utteranceRaw = utterance,
@@ -304,7 +305,6 @@ fun FieldVoiceScreen(
                 )
                 draft = interpreted.draft
                 session = interpreted.session
-                partialText = ""
 
                 if (isListening) {
                     val nextMode = if (session.mode == VoiceInputMode.WAIT_COMMAND) {
@@ -349,10 +349,58 @@ fun FieldVoiceScreen(
         }
     }
 
+    val micScale by animateFloatAsState(
+        targetValue = if (isListening) 1.04f else 1f,
+        animationSpec = tween(durationMillis = 200),
+        label = "voice_mic_scale"
+    )
+
+    val pulseTransition = rememberInfiniteTransition(label = "voice_mic_pulse")
+    val pulseScale by pulseTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.32f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "voice_pulse_scale_1"
+    )
+    val pulseAlpha by pulseTransition.animateFloat(
+        initialValue = 0.28f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "voice_pulse_alpha_1"
+    )
+    val pulseScaleSecondary by pulseTransition.animateFloat(
+        initialValue = 1.08f,
+        targetValue = 1.45f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1400, delayMillis = 320, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "voice_pulse_scale_2"
+    )
+    val pulseAlphaSecondary by pulseTransition.animateFloat(
+        initialValue = 0.18f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1400, delayMillis = 320, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "voice_pulse_alpha_2"
+    )
+
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.White),
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(Color(0xFFF8F8F4), Color.White)
+                )
+            ),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Row(
@@ -374,91 +422,120 @@ fun FieldVoiceScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(20.dp))
 
         Text(
-            text = "Сначала скажите название поля, затем значение:",
+            text = "Сначала скажите название поля, затем значение",
             fontWeight = FontWeight.SemiBold,
-            fontSize = 18.sp,
+            fontSize = 19.sp,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 32.dp),
-            color = Color(0xFF4A4A4A)
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = instructionFields,
-            fontSize = 16.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 32.dp),
-            color = Color(0xFF7A7A7A)
+            modifier = Modifier.padding(horizontal = 24.dp),
+            color = Color(0xFF3D3D3D)
         )
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(10.dp))
+
+        Surface(
+            modifier = Modifier
+                .padding(horizontal = 20.dp)
+                .fillMaxWidth(),
+            shape = RoundedCornerShape(20.dp),
+            color = Color.White,
+            tonalElevation = 1.dp,
+            shadowElevation = 5.dp
+        ) {
+            Text(
+                text = instructionFields,
+                fontSize = 15.sp,
+                lineHeight = 21.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+                color = Color(0xFF757575)
+            )
+        }
+
+        if (engineState == VoskCommandRecognizer.EngineState.ERROR && !engineMessage.isNullOrBlank()) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = engineMessage ?: "",
+                fontSize = 12.sp,
+                color = Coral,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 20.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(28.dp))
 
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(1f),
+                .size(300.dp)
+                .scale(micScale)
+                .clickable {
+                    if (isListening) stopAndOpenForm() else startListeningOrRequestPermission()
+                },
             contentAlignment = Alignment.Center
         ) {
-            Canvas(
+            if (isListening) {
+                Box(
+                    modifier = Modifier
+                        .size(220.dp * pulseScale)
+                        .border(
+                            width = 2.dp,
+                            color = accentColor.copy(alpha = pulseAlpha),
+                            shape = CircleShape
+                        )
+                )
+                Box(
+                    modifier = Modifier
+                        .size(220.dp * pulseScaleSecondary)
+                        .border(
+                            width = 1.dp,
+                            color = accentColor.copy(alpha = pulseAlphaSecondary),
+                            shape = CircleShape
+                        )
+                )
+            }
+
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth(0.9f)
-                    .aspectRatio(1f)
-                    .clickable {
-                        if (isListening) stopAndOpenForm() else startListeningOrRequestPermission()
-                    }
-                    .scale(if (isListening) 1.02f else 1f)
+                    .size(280.dp)
+                    .clip(CircleShape)
+                    .background(
+                        brush = Brush.radialGradient(
+                            colors = listOf(
+                                accentColor.copy(alpha = if (isListening) 0.20f else 0.12f),
+                                heroBackground,
+                                Color.White
+                            )
+                        )
+                    )
+                    .border(2.dp, accentColor.copy(alpha = 0.65f), CircleShape),
+                contentAlignment = Alignment.Center
             ) {
-                val center = Offset(size.width / 2f, size.height / 2f)
-
-                val circleRadius = size.minDimension * 0.48f
-                val circleBorderWidth = 4.dp.toPx()
-
-                drawCircle(color = circleFill, radius = circleRadius, center = center)
-                drawCircle(
-                    color = circleStroke,
-                    radius = circleRadius,
-                    center = center,
-                    style = Stroke(width = circleBorderWidth)
-                )
-
-                val micStrokeWidth = 4.dp.toPx()
-                val micHeight = size.minDimension * 0.5f
-                val micWidth = micHeight * 0.55f
-                val micTop = center.y - micHeight * 0.6f
-                val micLeft = center.x - micWidth / 2f
-
-                drawRoundRect(
-                    color = micColor,
-                    topLeft = Offset(micLeft, micTop),
-                    size = Size(micWidth, micHeight),
-                    cornerRadius = CornerRadius(micWidth / 2f, micWidth / 2f),
-                    style = Stroke(width = micStrokeWidth)
-                )
-
-                val stemHeight = micHeight * 0.22f
-                val stemTop = center.y + micHeight * 0.60f
-                val stemBottom = stemTop + stemHeight
-                drawLine(
-                    color = micColor,
-                    start = Offset(center.x, stemTop),
-                    end = Offset(center.x, stemBottom),
-                    strokeWidth = micStrokeWidth
-                )
-
-                val arcRadius = micHeight * 0.8f
-                val arcTop = stemTop - 2f * arcRadius
-                val arcLeft = center.x - arcRadius
-                drawArc(
-                    color = micColor,
-                    startAngle = 30f,
-                    sweepAngle = 120f,
-                    useCenter = false,
-                    topLeft = Offset(arcLeft, arcTop),
-                    size = Size(arcRadius * 2f, arcRadius * 2f),
-                    style = Stroke(width = micStrokeWidth)
-                )
+                Box(
+                    modifier = Modifier
+                        .size(162.dp)
+                        .clip(CircleShape)
+                        .background(
+                            brush = Brush.linearGradient(
+                                colors = if (isListening) {
+                                    listOf(accentColor, accentColor.copy(alpha = 0.78f))
+                                } else {
+                                    listOf(Color.White, heroBackground)
+                                }
+                            )
+                        )
+                        .border(1.dp, accentColor.copy(alpha = 0.38f), CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (isListening) Icons.Rounded.Mic else Icons.Outlined.MicNone,
+                        contentDescription = if (isListening) "Остановить запись" else "Начать запись",
+                        tint = if (isListening) Color.White else accentColor,
+                        modifier = Modifier.size(82.dp)
+                    )
+                }
             }
         }
 
@@ -475,9 +552,12 @@ fun FieldVoiceScreen(
             modifier = Modifier
                 .padding(horizontal = 32.dp)
                 .fillMaxWidth(),
-            shape = RoundedCornerShape(8.dp),
-            border = BorderStroke(1.dp, outlineColor),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = outlineColor)
+            shape = RoundedCornerShape(14.dp),
+            border = BorderStroke(1.dp, accentColor.copy(alpha = 0.6f)),
+            colors = ButtonDefaults.outlinedButtonColors(
+                containerColor = Color.White.copy(alpha = 0.9f),
+                contentColor = accentColor
+            )
         ) {
             Text("Ввести вручную", fontSize = 16.sp, fontWeight = FontWeight.Medium)
         }
@@ -530,6 +610,9 @@ fun FieldFormScreen(
             .fillMaxSize()
             .background(Color.White)
     ) {
+        val saveStartColor = if (status == FieldStatus.POGIB) Color(0xFFE05757) else Olive
+        val saveEndColor = if (status == FieldStatus.POGIB) Color(0xFFBA2F2F) else OliveDark
+
         Column(modifier = Modifier.fillMaxSize()) {
             Row(
                 modifier = Modifier
@@ -752,11 +835,47 @@ fun FieldFormScreen(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .padding(16.dp)
-                .height(56.dp),
-            shape = RoundedCornerShape(18.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Olive)
+                .height(58.dp),
+            shape = RoundedCornerShape(20.dp),
+            contentPadding = PaddingValues(0.dp),
+            elevation = ButtonDefaults.buttonElevation(
+                defaultElevation = 7.dp,
+                pressedElevation = 2.dp
+            ),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = Color.Transparent,
+                contentColor = Color.White
+            )
         ) {
-            Text("Сохранить и отправить", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        brush = Brush.horizontalGradient(
+                            colors = listOf(saveStartColor, saveEndColor)
+                        )
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Send,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        "Сохранить и отправить",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         }
     }
 }

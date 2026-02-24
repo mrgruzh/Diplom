@@ -2,21 +2,51 @@ package com.example.diplom.ui.fund
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.diplom.access.EvacHospitalBindingStorage
 import com.example.diplom.access.OrgDirectory
+import com.example.diplom.auth.AuthStorage
+import com.example.diplom.auth.UserProfile
+import com.example.diplom.auth.UserRole
 import com.example.diplom.data.AppDb
 import com.example.diplom.data.MedicalRecordEntity
 import kotlinx.coroutines.Dispatchers
@@ -45,25 +75,59 @@ fun FundHomeScreen(
     var kind by remember { mutableStateOf(FundKind.HOSPITALS) }
     var kindMenu by remember { mutableStateOf(false) }
 
-    val bindings = remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var bindings by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var users by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
+
     LaunchedEffect(Unit) {
-        bindings.value = EvacHospitalBindingStorage.allBindings(ctx)
+        bindings = EvacHospitalBindingStorage.allBindings(ctx)
+        users = AuthStorage.allUsers(ctx)
     }
 
-    val hospitals = remember(bindings.value) {
-        val collator = Collator.getInstance(Locale("ru", "RU")).apply { strength = Collator.PRIMARY }
-        (OrgDirectory.hospitals + bindings.value.values)
+    val collator = remember {
+        Collator.getInstance(Locale("ru", "RU")).apply {
+            strength = Collator.PRIMARY
+        }
+    }
+
+    val registeredHospitals = remember(users) {
+        users
+            .mapNotNull { profile ->
+                when (profile.role) {
+                    UserRole.EVAC_DOCTOR,
+                    UserRole.HOSPITAL_DOCTOR -> profile.hospital
+                    else -> null
+                }
+            }
             .map { it.trim() }
             .filter { it.isNotBlank() }
-            .distinct()
+    }
+
+    val registeredEvacPoints = remember(users) {
+        users
+            .mapNotNull { profile ->
+                when (profile.role) {
+                    UserRole.FELDSHER,
+                    UserRole.EVAC_DOCTOR -> profile.evacPoint
+                    else -> null
+                }
+            }
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+    }
+
+    val hospitals = remember(bindings, registeredHospitals) {
+        (OrgDirectory.hospitals + bindings.values + registeredHospitals)
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinctBy { it.lowercase(Locale("ru", "RU")) }
             .sortedWith { a, b -> collator.compare(a, b) }
     }
-    val evacPoints = remember(bindings.value) {
-        val collator = Collator.getInstance(Locale("ru", "RU")).apply { strength = Collator.PRIMARY }
-        (OrgDirectory.evacPoints + bindings.value.keys)
+
+    val evacPoints = remember(bindings, registeredEvacPoints) {
+        (OrgDirectory.evacPoints + bindings.keys + registeredEvacPoints)
             .map { it.trim() }
             .filter { it.isNotBlank() }
-            .distinct()
+            .distinctBy { it.lowercase(Locale("ru", "RU")) }
             .sortedWith { a, b -> collator.compare(a, b) }
     }
 
@@ -72,7 +136,11 @@ fun FundHomeScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.White)
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(Color(0xFFF8F9F5), Color.White)
+                )
+            )
     ) {
         Row(
             modifier = Modifier
@@ -85,48 +153,84 @@ fun FundHomeScreen(
             Text(
                 text = "выход",
                 fontSize = 12.sp,
-                color = Color(0xFF9E9E9E),
-                modifier = Modifier.clickable { onLogout() }
+                color = Color(0xFF777777),
+                modifier = Modifier
+                    .background(Color(0x14A9A9A9), shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                    .clickable { onLogout() }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
             )
+
             Text(
                 text = "Фонд",
-                fontSize = 16.sp,
+                fontSize = 19.sp,
                 fontWeight = FontWeight.SemiBold,
-                color = Color.Black
+                color = Color(0xFF2F2F2F)
             )
-            Spacer(modifier = Modifier.width(40.dp))
+
+            Spacer(modifier = Modifier.width(46.dp))
         }
 
-        ExposedDropdownMenuBox(
-            expanded = kindMenu,
-            onExpandedChange = { kindMenu = !kindMenu },
+        Surface(
             modifier = Modifier
-                .fillMaxWidth()
                 .padding(horizontal = 16.dp)
+                .fillMaxWidth(),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(18.dp),
+            color = Color.White,
+            tonalElevation = 1.dp,
+            shadowElevation = 5.dp
         ) {
-            OutlinedTextField(
-                value = kind.titleRu,
-                onValueChange = {},
-                readOnly = true,
-                label = { Text("Раздел") },
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = kindMenu) },
-                modifier = Modifier
-                    .menuAnchor()
-                    .fillMaxWidth()
-            )
-            ExposedDropdownMenu(
-                expanded = kindMenu,
-                onDismissRequest = { kindMenu = false }
-            ) {
-                FundKind.entries.forEach { k ->
-                    DropdownMenuItem(
-                        text = { Text(k.titleRu) },
-                        onClick = {
-                            kind = k
-                            kindMenu = false
-                        }
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = "Выберите раздел",
+                    fontSize = 13.sp,
+                    color = Color(0xFF6A6A6A)
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                ExposedDropdownMenuBox(
+                    expanded = kindMenu,
+                    onExpandedChange = { kindMenu = !kindMenu },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    OutlinedTextField(
+                        value = kind.titleRu,
+                        onValueChange = {},
+                        readOnly = true,
+                        singleLine = true,
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = kindMenu)
+                        },
+                        modifier = Modifier
+                            .menuAnchor()
+                            .fillMaxWidth()
                     )
+                    ExposedDropdownMenu(
+                        expanded = kindMenu,
+                        onDismissRequest = { kindMenu = false }
+                    ) {
+                        FundKind.entries.forEach { item ->
+                            DropdownMenuItem(
+                                text = { Text(item.titleRu) },
+                                onClick = {
+                                    kind = item
+                                    kindMenu = false
+                                }
+                            )
+                        }
+                    }
                 }
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = if (kind == FundKind.HOSPITALS)
+                        "Список госпиталей обновляется автоматически по регистрации"
+                    else
+                        "Список эвакопунктов обновляется автоматически по регистрации",
+                    fontSize = 12.sp,
+                    color = Color(0xFF8A8A8A)
+                )
             }
         }
 
@@ -134,39 +238,68 @@ fun FundHomeScreen(
 
         if (list.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Нет данных", color = Color(0xFF666666))
+                Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                    color = Color.White,
+                    shadowElevation = 2.dp
+                ) {
+                    Text(
+                        text = "Нет данных",
+                        color = Color(0xFF666666),
+                        modifier = Modifier.padding(horizontal = 22.dp, vertical = 14.dp)
+                    )
+                }
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp)
-            ) {
-                items(list) { name ->
+            return@Column
+        }
+
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(list) { name ->
+                Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                    color = Color.White,
+                    shadowElevation = 3.dp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenTable(kind, name) }
+                ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 12.dp)
-                            .clickable { onOpenTable(kind, name) },
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = name,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color.Black,
-                            modifier = Modifier.weight(1f)
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = name,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xFF242424)
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Нажмите, чтобы открыть сводку препаратов",
+                                fontSize = 12.sp,
+                                color = Color(0xFF8A8A8A)
+                            )
+                        }
+
                         Text(
                             text = "Открыть",
-                            fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.primary
+                            fontSize = 13.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
                         )
                     }
-                    Divider(color = Color(0xFFEAEAEA))
                 }
-                item { Spacer(modifier = Modifier.height(16.dp)) }
             }
+
+            item { Spacer(modifier = Modifier.height(14.dp)) }
         }
     }
 }
@@ -196,13 +329,17 @@ fun FundMedicineTableScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(Color.White)
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(Color(0xFFF8F9F5), Color.White)
+                )
+            )
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+                .padding(horizontal = 10.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
@@ -210,20 +347,43 @@ fun FundMedicineTableScreen(
                 Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = Color.Black)
             }
             Text(
-                text = "Лекарства: $locationName",
+                text = "Сводка: $locationName",
                 fontSize = 16.sp,
-                fontWeight = FontWeight.Medium,
-                color = Color.Black
+                fontWeight = FontWeight.SemiBold,
+                color = Color(0xFF272727)
             )
             Text(
                 text = "выход",
                 fontSize = 12.sp,
-                color = Color(0xFF9E9E9E),
-                modifier = Modifier.clickable { onLogout() }
+                color = Color(0xFF777777),
+                modifier = Modifier
+                    .background(Color(0x14A9A9A9), shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                    .clickable { onLogout() }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
             )
         }
 
-        Divider(color = Color(0xFFEAEAEA))
+        Surface(
+            modifier = Modifier
+                .padding(horizontal = 16.dp)
+                .fillMaxWidth(),
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+            color = Color.White,
+            shadowElevation = 2.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Препарат", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text("Количество", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
 
         if (loading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -234,52 +394,58 @@ fun FundMedicineTableScreen(
 
         if (rows.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("Нет записей по лекарствам", color = Color(0xFF666666))
+                Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
+                    color = Color.White,
+                    shadowElevation = 2.dp
+                ) {
+                    Text(
+                        text = "Нет записей по препаратам",
+                        color = Color(0xFF666666),
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp)
+                    )
+                }
             }
             return@Column
         }
 
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Препарат", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-            Text("Количество", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-        }
-        Divider(color = Color(0xFFEAEAEA))
-
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            items(rows) { r ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            items(rows) { row ->
+                Surface(
+                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                    color = Color.White,
+                    shadowElevation = 1.dp,
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = r.name,
-                        modifier = Modifier.weight(1f),
-                        fontSize = 14.sp,
-                        color = Color.Black
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = r.qty,
-                        fontSize = 14.sp,
-                        color = Color.Black
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 11.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = row.name,
+                            modifier = Modifier.weight(1f),
+                            fontSize = 14.sp,
+                            color = Color(0xFF202020)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            text = row.qty,
+                            fontSize = 14.sp,
+                            color = Color(0xFF202020)
+                        )
+                    }
                 }
-                Divider(color = Color(0xFFF0F0F0))
             }
-            item { Spacer(modifier = Modifier.height(16.dp)) }
+
+            item { Spacer(modifier = Modifier.height(12.dp)) }
         }
     }
 }

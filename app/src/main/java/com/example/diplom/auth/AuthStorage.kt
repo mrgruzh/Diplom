@@ -84,4 +84,18 @@ object AuthStorage {
         p.edit().putString(KEY_CURRENT_LOGIN, l).apply()
         return true
     }
+
+    fun allUsers(ctx: Context): List<UserProfile> {
+        val p = prefs(ctx)
+        val out = ArrayList<UserProfile>()
+
+        for ((k, v) in p.all) {
+            if (!k.startsWith("user:")) continue
+            val json = v as? String ?: continue
+            val profile = UserProfile.fromJsonString(json) ?: continue
+            out.add(profile)
+        }
+
+        return out
+    }
 }
