@@ -54,6 +54,8 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.Collator
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 enum class FundKind(val titleRu: String) {
@@ -62,6 +64,22 @@ enum class FundKind(val titleRu: String) {
 }
 
 private data class MedicineRow(val name: String, val qty: String)
+
+private enum class DateSort {
+    DESC,
+    ASC
+}
+
+private data class MedicineGroup(
+    val atMillis: Long,
+    val atText: String,
+    val items: List<MedicineRow>
+)
+
+private sealed class FundListItem {
+    data class Header(val atText: String, val atMillis: Long) : FundListItem()
+    data class Row(val atMillis: Long, val name: String, val qty: String) : FundListItem()
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -313,18 +331,27 @@ fun FundMedicineTableScreen(
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var rows by remember { mutableStateOf<List<MedicineRow>>(emptyList()) }
+    var groups by remember { mutableStateOf<List<MedicineGroup>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
+    var dateSort by remember { mutableStateOf(DateSort.DESC) }
 
     LaunchedEffect(kind, locationName) {
         loading = true
         val data = withContext(Dispatchers.IO) {
             val records = db.appDao().getAllRecords()
-            buildMedicineRows(records, kind, locationName)
+            buildMedicineGroups(records, kind, locationName)
         }
-        rows = data
+        groups = data
         loading = false
     }
+
+    val sortedGroups = remember(groups, dateSort) {
+        when (dateSort) {
+            DateSort.DESC -> groups.sortedByDescending { it.atMillis }
+            DateSort.ASC -> groups.sortedBy { it.atMillis }
+        }
+    }
+    val itemsForUi = remember(sortedGroups) { flattenGroups(sortedGroups) }
 
     Column(
         modifier = modifier
@@ -385,6 +412,31 @@ fun FundMedicineTableScreen(
 
         Spacer(modifier = Modifier.height(8.dp))
 
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            val title = when (dateSort) {
+                DateSort.DESC -> "Сортировка: новые сверху"
+                DateSort.ASC -> "Сортировка: старые сверху"
+            }
+            Text(
+                text = title,
+                fontSize = 12.sp,
+                color = Color(0xFF777777),
+                modifier = Modifier
+                    .background(Color(0x14A9A9A9), shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                    .clickable {
+                        dateSort = if (dateSort == DateSort.DESC) DateSort.ASC else DateSort.DESC
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         if (loading) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
@@ -392,7 +444,7 @@ fun FundMedicineTableScreen(
             return@Column
         }
 
-        if (rows.isEmpty()) {
+        if (itemsForUi.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Surface(
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
@@ -415,32 +467,53 @@ fun FundMedicineTableScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            items(rows) { row ->
-                Surface(
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                    color = Color.White,
-                    shadowElevation = 1.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 11.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = row.name,
-                            modifier = Modifier.weight(1f),
-                            fontSize = 14.sp,
-                            color = Color(0xFF202020)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = row.qty,
-                            fontSize = 14.sp,
-                            color = Color(0xFF202020)
-                        )
+            items(itemsForUi) { item ->
+                when (item) {
+                    is FundListItem.Header -> {
+                        Surface(
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                            color = Color(0xFFFAFAFA),
+                            shadowElevation = 1.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text(
+                                text = item.atText,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF2F2F2F),
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                            )
+                        }
+                    }
+
+                    is FundListItem.Row -> {
+                        Surface(
+                            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+                            color = Color.White,
+                            shadowElevation = 1.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = item.name,
+                                    modifier = Modifier.weight(1f),
+                                    fontSize = 14.sp,
+                                    color = Color(0xFF202020)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = item.qty,
+                                    fontSize = 14.sp,
+                                    color = Color(0xFF202020)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -450,49 +523,77 @@ fun FundMedicineTableScreen(
     }
 }
 
-private fun buildMedicineRows(
+private fun buildMedicineGroups(
     records: List<MedicalRecordEntity>,
     kind: FundKind,
     locationName: String
-): List<MedicineRow> {
+): List<MedicineGroup> {
     val loc = locationName.trim()
     if (loc.isBlank()) return emptyList()
 
-    val out = ArrayList<MedicineRow>(64)
+    data class Acc(
+        var atMillis: Long,
+        val atText: String,
+        val items: MutableList<MedicineRow>
+    )
+
+    val grouped = linkedMapOf<String, Acc>()
 
     for (r in records) {
         val meta = safeJson(r.rawText)
         val meds = parseMedicines(meta)
         if (meds.isEmpty()) continue
 
-        when (kind) {
+        val ok = when (kind) {
             FundKind.EVAC_POINTS -> {
                 val authorEvac = meta.optString("authorEvacPoint", "").trim()
-                if (!authorEvac.equals(loc, ignoreCase = false)) continue
-                out.addAll(meds)
+                authorEvac == loc
             }
+
             FundKind.HOSPITALS -> {
                 val role = meta.optString("authorRole", "").trim()
                 val authorHospital = meta.optString("authorHospital", "").trim()
                 val boundHospital = meta.optString("boundHospital", "").trim()
-
-                val ok = if (role == "HOSPITAL_DOCTOR") {
-                    authorHospital == loc
-                } else {
-                    boundHospital == loc
-                }
-                if (!ok) continue
-                out.addAll(meds)
+                if (role == "HOSPITAL_DOCTOR") authorHospital == loc else boundHospital == loc
             }
         }
+
+        if (!ok) continue
+
+        val filledAt = meta.optString("filledAt", "").trim()
+        val atMillis = parseDateTimeMillis(filledAt) ?: r.createdAt
+        val atText = filledAt.ifBlank { formatDateTime(r.createdAt) }
+
+        val acc = grouped.getOrPut(atText) {
+            Acc(
+                atMillis = atMillis,
+                atText = atText,
+                items = ArrayList(8)
+            )
+        }
+        if (atMillis < acc.atMillis) acc.atMillis = atMillis
+        acc.items.addAll(meds)
     }
 
-    val collator = Collator.getInstance(Locale("ru", "RU")).apply { strength = Collator.PRIMARY }
-    return out.sortedWith { a, b ->
-        val c1 = collator.compare(a.name, b.name)
-        if (c1 != 0) return@sortedWith c1
-        collator.compare(a.qty, b.qty)
+    return grouped.values
+        .map { MedicineGroup(atMillis = it.atMillis, atText = it.atText, items = it.items) }
+}
+
+private fun flattenGroups(groups: List<MedicineGroup>): List<FundListItem> {
+    val out = ArrayList<FundListItem>(groups.size * 4)
+    for (g in groups) {
+        out.add(FundListItem.Header(atText = g.atText, atMillis = g.atMillis))
+        for (m in g.items) {
+            out.add(
+                FundListItem.Row(
+                    atMillis = g.atMillis,
+                    name = m.name,
+                    qty = m.qty
+                )
+            )
+        }
     }
+    return out
 }
 
 private fun parseMedicines(meta: JSONObject): List<MedicineRow> {
@@ -510,6 +611,19 @@ private fun parseMedicines(meta: JSONObject): List<MedicineRow> {
 }
 
 private fun dash(value: String): String = if (value.isBlank()) "-" else value
+
+private val fundDateTimeFormat = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
+
+private fun parseDateTimeMillis(value: String): Long? {
+    if (value.isBlank()) return null
+    return try {
+        fundDateTimeFormat.parse(value)?.time
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private fun formatDateTime(millis: Long): String = fundDateTimeFormat.format(Date(millis))
 
 private fun safeJson(rawText: String?): JSONObject {
     return try {

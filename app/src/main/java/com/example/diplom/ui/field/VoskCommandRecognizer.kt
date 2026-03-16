@@ -41,6 +41,8 @@ class VoskCommandRecognizer(
     private var stateCb: ((EngineState, String?) -> Unit)? = null
     private var partialCb: ((String) -> Unit)? = null
     private var textCb: ((String) -> Unit)? = null
+    private var rawPartialCb: ((String) -> Unit)? = null
+    private var rawTextCb: ((String) -> Unit)? = null
 
     private var lastDeliveredText: String = ""
 
@@ -72,10 +74,14 @@ class VoskCommandRecognizer(
     fun start(
         mode: ListenMode,
         onPartialText: (String) -> Unit,
-        onUtteranceText: (String) -> Unit
+        onUtteranceText: (String) -> Unit,
+        onRawPartialText: (String) -> Unit,
+        onRawUtteranceText: (String) -> Unit
     ): Boolean {
         partialCb = onPartialText
         textCb = onUtteranceText
+        rawPartialCb = onRawPartialText
+        rawTextCb = onRawUtteranceText
 
         if (model == null) {
             postState(EngineState.ERROR, "Модель Vosk еще не загружена")
@@ -117,17 +123,20 @@ class VoskCommandRecognizer(
 
     override fun onPartialResult(hypothesis: String?) {
         val text = parseText(hypothesis, key = "partial")
+        main.post { rawPartialCb?.invoke(text) }
         if (text.isBlank()) return
         main.post { partialCb?.invoke(text) }
     }
 
     override fun onResult(hypothesis: String?) {
         val text = parseText(hypothesis, key = "text")
+        main.post { rawTextCb?.invoke(text) }
         deliverUtterance(text)
     }
 
     override fun onFinalResult(hypothesis: String?) {
         val text = parseText(hypothesis, key = "text")
+        main.post { rawTextCb?.invoke(text) }
         deliverUtterance(text)
     }
 
@@ -152,10 +161,8 @@ class VoskCommandRecognizer(
         }
 
         try {
-            recognizer = when (currentMode) {
-                ListenMode.COMMAND -> Recognizer(m, SAMPLE_RATE.toFloat(), VoiceFormInterpreter.commandGrammarJson())
-                ListenMode.FREE -> Recognizer(m, SAMPLE_RATE.toFloat())
-            }
+            recognizer = Recognizer(m, SAMPLE_RATE.toFloat())
+            recognizer?.setWords(false)
 
             speechService = SpeechService(recognizer!!, SAMPLE_RATE.toFloat())
             speechService?.startListening(this)
@@ -168,7 +175,10 @@ class VoskCommandRecognizer(
     }
 
     private fun deliverUtterance(text: String) {
-        if (text.isBlank()) return
+        val cleaned = text.trim()
+        if (cleaned.isBlank()) return
+        if (cleaned.equals("[unk]", ignoreCase = true)) return
+        if (cleaned.equals("unk", ignoreCase = true)) return
         if (text == lastDeliveredText) return
         lastDeliveredText = text
         main.post { textCb?.invoke(text) }
