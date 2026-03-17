@@ -189,6 +189,7 @@ class MainActivity : ComponentActivity() {
 
                         is FieldScreenState.FundHome -> {
                             FundHomeScreen(
+                                db = db,
                                 onLogout = {
                                     AuthStorage.logout(ctx)
                                     currentUser = null
