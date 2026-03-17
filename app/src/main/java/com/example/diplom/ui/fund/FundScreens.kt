@@ -31,6 +31,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,11 +50,11 @@ import com.example.diplom.auth.UserProfile
 import com.example.diplom.auth.UserRole
 import com.example.diplom.data.AppDb
 import com.example.diplom.data.MedicalRecordEntity
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.text.Collator
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 enum class FundKind(val titleRu: String) {
@@ -61,11 +62,26 @@ enum class FundKind(val titleRu: String) {
     EVAC_POINTS("Эвакопункты")
 }
 
-private data class MedicineRow(val name: String, val qty: String)
+private data class MedicineRow(
+    val name: String,
+    val qty: String,
+    val timeText: String,
+    val atMillis: Long,
+    val sourceLabel: String
+)
+private data class RecordLocations(val evacPoints: List<String>, val hospitals: List<String>)
+private data class LocationTimes(val evacPoints: Map<String, Long>, val hospitals: Map<String, Long>)
+
+private enum class DateSort {
+    DESC,
+    ASC
+}
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FundHomeScreen(
+    db: AppDb,
     onLogout: () -> Unit,
     onOpenTable: (FundKind, String) -> Unit,
     modifier: Modifier = Modifier
@@ -74,6 +90,7 @@ fun FundHomeScreen(
 
     var kind by remember { mutableStateOf(FundKind.HOSPITALS) }
     var kindMenu by remember { mutableStateOf(false) }
+    var listSort by remember { mutableStateOf(DateSort.DESC) }
 
     var bindings by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var users by remember { mutableStateOf<List<UserProfile>>(emptyList()) }
@@ -82,6 +99,10 @@ fun FundHomeScreen(
         bindings = EvacHospitalBindingStorage.allBindings(ctx)
         users = AuthStorage.allUsers(ctx)
     }
+
+    val records by db.appDao().observeAllRecords().collectAsState(initial = emptyList())
+    val recordLocations = remember(records) { extractLocationsFromRecords(records) }
+    val recordTimes = remember(records) { extractLocationTimes(records) }
 
     val collator = remember {
         Collator.getInstance(Locale("ru", "RU")).apply {
@@ -115,20 +136,26 @@ fun FundHomeScreen(
             .filter { it.isNotBlank() }
     }
 
-    val hospitals = remember(bindings, registeredHospitals) {
-        (OrgDirectory.hospitals + bindings.values + registeredHospitals)
+    val hospitalsBase = remember(bindings, registeredHospitals, recordLocations) {
+        (OrgDirectory.hospitals + bindings.values + registeredHospitals + recordLocations.hospitals)
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .distinctBy { it.lowercase(Locale("ru", "RU")) }
-            .sortedWith { a, b -> collator.compare(a, b) }
     }
 
-    val evacPoints = remember(bindings, registeredEvacPoints) {
-        (OrgDirectory.evacPoints + bindings.keys + registeredEvacPoints)
+    val evacPointsBase = remember(bindings, registeredEvacPoints, recordLocations) {
+        (OrgDirectory.evacPoints + bindings.keys + registeredEvacPoints + recordLocations.evacPoints)
             .map { it.trim() }
             .filter { it.isNotBlank() }
             .distinctBy { it.lowercase(Locale("ru", "RU")) }
-            .sortedWith { a, b -> collator.compare(a, b) }
+    }
+
+    val hospitals = remember(hospitalsBase, listSort, collator, recordTimes) {
+        sortByTime(hospitalsBase, recordTimes.hospitals, listSort, collator)
+    }
+
+    val evacPoints = remember(evacPointsBase, listSort, collator, recordTimes) {
+        sortByTime(evacPointsBase, recordTimes.evacPoints, listSort, collator)
     }
 
     val list = if (kind == FundKind.HOSPITALS) hospitals else evacPoints
@@ -225,12 +252,39 @@ fun FundHomeScreen(
 
                 Text(
                     text = if (kind == FundKind.HOSPITALS)
-                        "Список госпиталей обновляется автоматически по регистрации"
+                        "Список госпиталей обновляется по регистрации и синхронизации"
                     else
-                        "Список эвакопунктов обновляется автоматически по регистрации",
+                        "Список эвакопунктов обновляется по регистрации и синхронизации",
                     fontSize = 12.sp,
                     color = Color(0xFF8A8A8A)
                 )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    val label = if (listSort == DateSort.DESC)
+                        "Сортировка: новые сверху"
+                    else
+                        "Сортировка: старые сверху"
+
+                    Text(
+                        text = label,
+                        fontSize = 12.sp,
+                        color = Color(0xFF777777),
+                        modifier = Modifier
+                            .background(
+                                Color(0x14A9A9A9),
+                                shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
+                            )
+                            .clickable {
+                                listSort = if (listSort == DateSort.DESC) DateSort.ASC else DateSort.DESC
+                            }
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
             }
         }
 
@@ -313,17 +367,22 @@ fun FundMedicineTableScreen(
     onLogout: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var rows by remember { mutableStateOf<List<MedicineRow>>(emptyList()) }
+    val records by db.appDao().observeAllRecords().collectAsState(initial = emptyList())
     var loading by remember { mutableStateOf(true) }
+    var dateSort by remember { mutableStateOf(DateSort.DESC) }
 
-    LaunchedEffect(kind, locationName) {
-        loading = true
-        val data = withContext(Dispatchers.IO) {
-            val records = db.appDao().getAllRecords()
-            buildMedicineRows(records, kind, locationName)
-        }
-        rows = data
+    val rows = remember(records, kind, locationName) {
+        buildMedicineRows(records, kind, locationName)
+    }
+    LaunchedEffect(rows) {
         loading = false
+    }
+
+    val sortedRows = remember(rows, dateSort) {
+        when (dateSort) {
+            DateSort.DESC -> rows.sortedByDescending { it.atMillis }
+            DateSort.ASC -> rows.sortedBy { it.atMillis }
+        }
     }
 
     Column(
@@ -375,12 +434,53 @@ fun FundMedicineTableScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 14.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Препарат", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Text("Количество", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(
+                    "Лекарство",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                Text(
+                    "Доза",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    modifier = Modifier.weight(0.35f)
+                )
+                Text(
+                    "Время",
+                    fontWeight = FontWeight.SemiBold,
+                    fontSize = 14.sp,
+                    modifier = Modifier.weight(0.45f)
+                )
             }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.End
+        ) {
+            val title = when (dateSort) {
+                DateSort.DESC -> "Сортировка: новые сверху"
+                DateSort.ASC -> "Сортировка: старые сверху"
+            }
+            Text(
+                text = title,
+                fontSize = 12.sp,
+                color = Color(0xFF777777),
+                modifier = Modifier
+                    .background(Color(0x14A9A9A9), shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp))
+                    .clickable {
+                        dateSort = if (dateSort == DateSort.DESC) DateSort.ASC else DateSort.DESC
+                    }
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            )
         }
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -392,7 +492,7 @@ fun FundMedicineTableScreen(
             return@Column
         }
 
-        if (rows.isEmpty()) {
+        if (sortedRows.isEmpty()) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Surface(
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(14.dp),
@@ -415,32 +515,48 @@ fun FundMedicineTableScreen(
                 .padding(horizontal = 16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            items(rows) { row ->
+            items(sortedRows) { row ->
                 Surface(
                     shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
                     color = Color.White,
                     shadowElevation = 1.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 11.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(horizontal = 14.dp, vertical = 10.dp)
                     ) {
                         Text(
-                            text = row.name,
-                            modifier = Modifier.weight(1f),
-                            fontSize = 14.sp,
-                            color = Color(0xFF202020)
+                            text = row.sourceLabel,
+                            fontSize = 11.sp,
+                            color = Color(0xFF9A9A9A)
                         )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = row.qty,
-                            fontSize = 14.sp,
-                            color = Color(0xFF202020)
-                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = row.name,
+                                modifier = Modifier.weight(1f),
+                                fontSize = 14.sp,
+                                color = Color(0xFF202020)
+                            )
+                            Text(
+                                text = row.qty,
+                                modifier = Modifier.weight(0.35f),
+                                fontSize = 14.sp,
+                                color = Color(0xFF202020)
+                            )
+                            Text(
+                                text = row.timeText,
+                                modifier = Modifier.weight(0.45f),
+                                fontSize = 13.sp,
+                                color = Color(0xFF444444)
+                            )
+                        }
                     }
                 }
             }
@@ -462,54 +578,198 @@ private fun buildMedicineRows(
 
     for (r in records) {
         val meta = safeJson(r.rawText)
+        val placement = recordPlacement(r, meta)
+        val target = if (kind == FundKind.EVAC_POINTS) placement.evacPoint else placement.hospital
+        if (target.isNullOrBlank() || target != loc) continue
+
         val meds = parseMedicines(meta)
         if (meds.isEmpty()) continue
 
-        when (kind) {
-            FundKind.EVAC_POINTS -> {
-                val authorEvac = meta.optString("authorEvacPoint", "").trim()
-                if (!authorEvac.equals(loc, ignoreCase = false)) continue
-                out.addAll(meds)
-            }
-            FundKind.HOSPITALS -> {
-                val role = meta.optString("authorRole", "").trim()
-                val authorHospital = meta.optString("authorHospital", "").trim()
-                val boundHospital = meta.optString("boundHospital", "").trim()
+        val filledAt = meta.optString("filledAt", "").trim()
+        val atMillis = parseDateTimeMillis(filledAt) ?: r.createdAt
+        val timeText = filledAt.ifBlank { formatDateTime(r.createdAt) }
+        val sourceLabel = buildSourceLabel(kind, loc, meta, placement)
 
-                val ok = if (role == "HOSPITAL_DOCTOR") {
-                    authorHospital == loc
-                } else {
-                    boundHospital == loc
-                }
-                if (!ok) continue
-                out.addAll(meds)
-            }
+        for (m in meds) {
+            out.add(
+                MedicineRow(
+                    name = m.name,
+                    qty = m.qty,
+                    timeText = timeText,
+                    atMillis = atMillis,
+                    sourceLabel = sourceLabel
+                )
+            )
         }
     }
 
-    val collator = Collator.getInstance(Locale("ru", "RU")).apply { strength = Collator.PRIMARY }
-    return out.sortedWith { a, b ->
-        val c1 = collator.compare(a.name, b.name)
-        if (c1 != 0) return@sortedWith c1
-        collator.compare(a.qty, b.qty)
-    }
+    return out
 }
 
-private fun parseMedicines(meta: JSONObject): List<MedicineRow> {
+private data class MedicineEntry(val name: String, val qty: String)
+
+private fun parseMedicines(meta: JSONObject): List<MedicineEntry> {
     val arr = meta.optJSONArray("medicines") ?: JSONArray()
     if (arr.length() == 0) return emptyList()
 
-    val out = ArrayList<MedicineRow>(arr.length())
+    val out = ArrayList<MedicineEntry>(arr.length())
     for (i in 0 until arr.length()) {
         val o = arr.optJSONObject(i) ?: continue
         val name = dash(o.optString("name", "").trim())
         val qty = dash(o.optString("qty", "").trim())
-        out.add(MedicineRow(name = name, qty = qty))
+        out.add(MedicineEntry(name = name, qty = qty))
     }
     return out
 }
 
 private fun dash(value: String): String = if (value.isBlank()) "-" else value
+
+private val fundDateTimeFormat = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault())
+
+private fun parseDateTimeMillis(value: String): Long? {
+    if (value.isBlank()) return null
+    return try {
+        fundDateTimeFormat.parse(value)?.time
+    } catch (_: Exception) {
+        null
+    }
+}
+
+private fun formatDateTime(millis: Long): String = fundDateTimeFormat.format(Date(millis))
+
+private data class RecordPlacement(
+    val evacPoint: String?,
+    val hospital: String?
+)
+
+private fun recordPlacement(record: MedicalRecordEntity, meta: JSONObject): RecordPlacement {
+    val authorEvac = meta.optString("authorEvacPoint", "").trim()
+    val authorHospital = meta.optString("authorHospital", "").trim()
+    val boundHospital = meta.optString("boundHospital", "").trim()
+    val stage = record.stage.trim()
+    val dest = record.destination?.trim().orEmpty()
+
+    val evacPoint = when {
+        authorEvac.isNotBlank() -> authorEvac
+        stage.contains("EVAC_POINT", ignoreCase = true) || stage.equals("EVAC", ignoreCase = true) -> dest
+        else -> ""
+    }
+
+    val hospital = when {
+        authorHospital.isNotBlank() -> authorHospital
+        boundHospital.isNotBlank() -> boundHospital
+        stage.contains("HOSPITAL", ignoreCase = true) -> dest
+        else -> ""
+    }
+
+    return RecordPlacement(
+        evacPoint = evacPoint.ifBlank { null },
+        hospital = hospital.ifBlank { null }
+    )
+}
+
+private fun buildSourceLabel(
+    kind: FundKind,
+    locationName: String,
+    meta: JSONObject,
+    placement: RecordPlacement
+): String {
+    val authorEvac = meta.optString("authorEvacPoint", "").trim()
+    val fromEvac = meta.optString("fromEvacPoint", "").trim()
+    val authorHospital = meta.optString("authorHospital", "").trim()
+    val boundHospital = meta.optString("boundHospital", "").trim()
+
+    return when (kind) {
+        FundKind.HOSPITALS -> {
+            when {
+                authorHospital.isNotBlank() && authorHospital == locationName ->
+                    "Госпиталь: $authorHospital"
+                boundHospital.isNotBlank() && boundHospital == locationName -> {
+                    val ep = authorEvac.ifBlank { fromEvac }
+                    if (ep.isNotBlank()) "Эвакопункт: $ep" else "Эвакопункт"
+                }
+                authorHospital.isNotBlank() -> "Госпиталь: $authorHospital"
+                authorEvac.isNotBlank() || fromEvac.isNotBlank() -> {
+                    val ep = authorEvac.ifBlank { fromEvac }
+                    "Эвакопункт: $ep"
+                }
+                placement.hospital != null -> "Госпиталь: ${placement.hospital}"
+                else -> "Источник: $locationName"
+            }
+        }
+
+        FundKind.EVAC_POINTS -> {
+            val ep = authorEvac
+                .ifBlank { fromEvac }
+                .ifBlank { placement.evacPoint ?: locationName }
+            "Эвакопункт: $ep"
+        }
+    }
+}
+
+private fun extractLocationsFromRecords(records: List<MedicalRecordEntity>): RecordLocations {
+    val evacPoints = LinkedHashSet<String>()
+    val hospitals = LinkedHashSet<String>()
+
+    for (r in records) {
+        val meta = safeJson(r.rawText)
+        val placement = recordPlacement(r, meta)
+        placement.evacPoint?.let { evacPoints.add(it) }
+        placement.hospital?.let { hospitals.add(it) }
+    }
+
+    return RecordLocations(
+        evacPoints = evacPoints.toList(),
+        hospitals = hospitals.toList()
+    )
+}
+
+private fun extractLocationTimes(records: List<MedicalRecordEntity>): LocationTimes {
+    val evacTimes = LinkedHashMap<String, Long>()
+    val hospTimes = LinkedHashMap<String, Long>()
+
+    for (r in records) {
+        val meta = safeJson(r.rawText)
+        val placement = recordPlacement(r, meta)
+        val filledAt = meta.optString("filledAt", "").trim()
+        val atMillis = parseDateTimeMillis(filledAt) ?: r.createdAt
+
+        placement.evacPoint?.let { name ->
+            val current = evacTimes[name] ?: 0L
+            if (atMillis > current) evacTimes[name] = atMillis
+        }
+
+        placement.hospital?.let { name ->
+            val current = hospTimes[name] ?: 0L
+            if (atMillis > current) hospTimes[name] = atMillis
+        }
+    }
+
+    return LocationTimes(
+        evacPoints = evacTimes,
+        hospitals = hospTimes
+    )
+}
+
+private fun sortByTime(
+    names: List<String>,
+    times: Map<String, Long>,
+    sort: DateSort,
+    collator: Collator
+): List<String> {
+    return names.sortedWith { a, b ->
+        val ta = times[a] ?: 0L
+        val tb = times[b] ?: 0L
+
+        val cmp = when {
+            ta == tb -> 0
+            sort == DateSort.DESC -> if (ta > tb) -1 else 1
+            else -> if (ta < tb) -1 else 1
+        }
+
+        if (cmp != 0) cmp else collator.compare(a, b)
+    }
+}
 
 private fun safeJson(rawText: String?): JSONObject {
     return try {

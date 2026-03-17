@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("com.google.devtools.ksp") version "2.0.21-1.0.25"   // <— добавили
+    id("com.google.gms.google-services")
 }
 
 
@@ -69,5 +70,8 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.github.commandiron:WheelPickerCompose:1.1.11")
     implementation("com.alphacephei:vosk-android:0.3.47")
+    implementation(platform("com.google.firebase:firebase-bom:33.2.0"))
+    implementation("com.google.firebase:firebase-auth-ktx")
+    implementation("com.google.firebase:firebase-database-ktx")
     //debugImplementation("androidx.sqlite:sqlite-inspection:1.0.0")
 }

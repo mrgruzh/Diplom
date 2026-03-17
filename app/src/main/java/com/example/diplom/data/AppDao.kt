@@ -69,6 +69,9 @@ interface AppDao {
     @Query("SELECT * FROM medical_records ORDER BY createdAt DESC")
     suspend fun getAllRecords(): List<MedicalRecordEntity>
 
+    @Query("SELECT * FROM medical_records ORDER BY createdAt DESC")
+    fun observeAllRecords(): Flow<List<MedicalRecordEntity>>
+
     // Удалить медзапись
     @Query("DELETE FROM medical_records WHERE id = :id")
     suspend fun deleteRecord(id: Long)

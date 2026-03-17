@@ -1,16 +1,33 @@
 Param(
-    [string]$ModelUrl = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
+    [ValidateSet("high", "small")]
+    [string]$Preset = "high",
+    [string]$ModelUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
 
+if ([string]::IsNullOrWhiteSpace($ModelUrl)) {
+    if ($Preset -eq "high") {
+        $ModelUrl = "https://alphacephei.com/vosk/models/vosk-model-ru-0.42.zip"
+    } else {
+        $ModelUrl = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
+    }
+}
+
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $assetsModelDir = Join-Path $repoRoot "app\src\main\assets\model-ru"
-$tmpZip = Join-Path $env:TEMP "vosk-model-small-ru-0.22.zip"
-$tmpExtract = Join-Path $env:TEMP "vosk-model-small-ru-0.22"
+
+$fileName = Split-Path $ModelUrl -Leaf
+if ([string]::IsNullOrWhiteSpace($fileName)) {
+    throw "Cannot resolve file name from URL: $ModelUrl"
+}
+
+$tmpZip = Join-Path $env:TEMP $fileName
+$tmpExtract = Join-Path $env:TEMP ([System.IO.Path]::GetFileNameWithoutExtension($fileName))
 
 Write-Host "Repository root: $repoRoot"
 Write-Host "Model target:    $assetsModelDir"
+Write-Host "Model URL:       $ModelUrl"
 
 if (Test-Path $tmpExtract) {
     Remove-Item $tmpExtract -Recurse -Force
@@ -46,7 +63,7 @@ if ($missing.Count -gt 0) {
 
 $uuidFile = Join-Path $assetsModelDir "uuid"
 if (-not (Test-Path $uuidFile)) {
-    $uuid = "model-ru-small-0.22-" + (Get-Date -Format "yyyyMMddHHmmss")
+    $uuid = "model-ru-$Preset-" + (Get-Date -Format "yyyyMMddHHmmss")
     Set-Content -Path $uuidFile -Value $uuid -Encoding Ascii
 }
 

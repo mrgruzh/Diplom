@@ -1,5 +1,10 @@
 package com.example.diplom.ui.summary
 
+import android.content.Intent
+import android.provider.OpenableColumns
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -7,6 +12,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -15,9 +21,12 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.FileProvider
 import com.example.diplom.access.InboxKind
+import com.example.diplom.pdf.Form100FileNamer
 import com.example.diplom.pdf.Form100Storage
 import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -37,12 +46,78 @@ fun SummaryScreen(
 
     var files by remember { mutableStateOf<List<File>>(emptyList()) }
     var forwardFile by remember { mutableStateOf<File?>(null) }
+    var refreshTick by remember { mutableStateOf(0) }
 
-    LaunchedEffect(inboxKind, locationName) {
-        val dir = when (inboxKind) {
+    fun refresh() {
+        refreshTick += 1
+    }
+
+    fun currentDir(): File {
+        return when (inboxKind) {
             InboxKind.EVAC_POINT -> Form100Storage.evacInboxDir(ctx, locationName)
             InboxKind.HOSPITAL -> Form100Storage.hospitalInboxDir(ctx, locationName)
         }
+    }
+
+    fun sharePdf(file: File) {
+        val uri = FileProvider.getUriForFile(
+            ctx,
+            "${ctx.packageName}.fileprovider",
+            file
+        )
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "application/pdf"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        try {
+            ctx.startActivity(Intent.createChooser(intent, "Поделиться PDF"))
+        } catch (_: Exception) {
+            Toast.makeText(ctx, "Не удалось открыть меню отправки", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        try {
+            val displayName = ctx.contentResolver
+                .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { c ->
+                    val idx = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (idx >= 0 && c.moveToFirst()) c.getString(idx) else null
+                }
+                ?.trim()
+                .orEmpty()
+
+            val baseRaw = displayName
+                .removeSuffix(".pdf")
+                .removeSuffix(".PDF")
+                .ifBlank { "imported" }
+
+            val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val safeBase = Form100FileNamer.sanitizeFileName(baseRaw)
+            val out = File(currentDir(), "${safeBase}_$ts.pdf")
+
+            ctx.contentResolver.openInputStream(uri)?.use { input ->
+                FileOutputStream(out).use { output ->
+                    input.copyTo(output)
+                }
+            } ?: run {
+                Toast.makeText(ctx, "Не удалось прочитать файл", Toast.LENGTH_LONG).show()
+                return@rememberLauncherForActivityResult
+            }
+
+            Toast.makeText(ctx, "Импортировано: ${out.name}", Toast.LENGTH_SHORT).show()
+            refresh()
+        } catch (_: Exception) {
+            Toast.makeText(ctx, "Ошибка импорта PDF", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    LaunchedEffect(inboxKind, locationName, refreshTick) {
+        val dir = currentDir()
         files = dir
             .listFiles { f -> f.isFile && f.extension.equals("pdf", ignoreCase = true) }
             ?.sortedByDescending { it.lastModified() }
@@ -67,7 +142,13 @@ fun SummaryScreen(
                     Icon(Icons.Default.ArrowBack, contentDescription = "Назад", tint = Color.Black)
                 }
                 Text(title, fontSize = 16.sp, fontWeight = FontWeight.Medium, color = Color.Black)
-                Spacer(modifier = Modifier.width(40.dp))
+
+                IconButton(
+                    onClick = { importLauncher.launch("application/pdf") },
+                    colors = IconButtonDefaults.iconButtonColors(contentColor = Color.Black)
+                ) {
+                    Icon(Icons.Default.UploadFile, contentDescription = "Импорт PDF")
+                }
             }
 
             if (files.isEmpty()) {
@@ -85,6 +166,7 @@ fun SummaryScreen(
                             file = f,
                             canForward = canForwardToHospital,
                             onOpen = { onOpenPdf(f) },
+                            onShare = { sharePdf(f) },
                             onForward = { forwardFile = f }
                         )
                         Divider(color = Color(0xFFEAEAEA))
@@ -113,6 +195,7 @@ private fun SummaryRow(
     file: File,
     canForward: Boolean,
     onOpen: () -> Unit,
+    onShare: () -> Unit,
     onForward: () -> Unit
 ) {
     val sdf = remember { SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()) }
@@ -142,6 +225,15 @@ private fun SummaryRow(
             modifier = Modifier
                 .padding(horizontal = 8.dp)
                 .clickable { onOpen() }
+        )
+
+        Text(
+            text = "Поделиться",
+            color = Color(0xFF1565C0),
+            fontSize = 14.sp,
+            modifier = Modifier
+                .padding(horizontal = 8.dp)
+                .clickable { onShare() }
         )
 
         if (canForward) {
